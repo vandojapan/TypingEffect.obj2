@@ -1,4 +1,4 @@
---information:TypingEffect v0.5.3
+--information:TypingEffect v0.5.4
 --group:文章,true
 --text@source:文章,今日はいい天気です
 --select@language:言語,日本語=0,中文=1
@@ -24,7 +24,7 @@
 --track@cursor_blink_ratio:点滅割合,0,100,50,1
 --track@cursor_on_speed:点灯速度,0,100,100,1
 --track@cursor_off_speed:消灯速度,0,100,75,1
---track@cursor_thickness:カーソルの太さ,1,30,3,1
+--track@cursor_thickness:カーソルの太さ,1,100,3,1
 --group:未確定文字,false
 --check@show_underline:変換前に下線を表示,true
 --track@underline_thickness:下線の太さ,1,12,2,1
@@ -539,10 +539,19 @@ if show_cursor and (cursor_active or keep_cursor) then
     end
 end
 if draw_cursor and cursor_alpha > 0 then
-    local cursor_h = math.max(1, font_size * 0.9)
+    -- 一部のOTFフォントではfont_sizeと実際の描画高が一致しない。
+    -- 実際の文字レイアウト高を基準にカーソルの高さと位置を決定する。
+    local cursor_h = math.max(1, current_h)
     local cursor_x = left_edge + current_w + cursor_gap + cursor_thickness / 2
-    local cursor_y = text_center_y
-    draw_rectangle(cursor_x, cursor_y, cursor_thickness, cursor_h, text_color, cursor_alpha)
+    local cursor_y = top_edge + current_h / 2
+    draw_rectangle(
+        cursor_x,
+        cursor_y,
+        cursor_thickness,
+        cursor_h,
+        text_color,
+        cursor_alpha
+    )
 end
 
 -- 仮想バッファの合成結果を現在オブジェクトへ戻し、後続効果へ渡す。
