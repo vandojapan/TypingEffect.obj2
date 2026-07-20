@@ -539,12 +539,28 @@ if show_cursor and (cursor_active or keep_cursor) then
     end
 end
 if draw_cursor and cursor_alpha > 0 then
+<<<<<<< HEAD
     -- 一部のOTFフォントでは font_size 基準だとカーソルが高すぎたり低すぎたりする。
     -- 実際のレイアウト高 current_h を基準にして、文字の高さへ追従させる。
     local cursor_h = math.max(1, current_h)
     local cursor_x = left_edge + current_w + cursor_gap + cursor_thickness / 2
     local cursor_y = top_edge + current_h / 2
     draw_rectangle(cursor_x, cursor_y, cursor_thickness, cursor_h, text_color, cursor_alpha)
+=======
+    -- 一部のOTFフォントではfont_sizeと実際の描画高が一致しない。
+    -- 実際の文字レイアウト高を基準にカーソルの高さと位置を決定する。
+    local cursor_h = math.max(1, current_h)
+    local cursor_x = left_edge + current_w + cursor_gap + cursor_thickness / 2
+    local cursor_y = top_edge + current_h / 2
+    draw_rectangle(
+        cursor_x,
+        cursor_y,
+        cursor_thickness,
+        cursor_h,
+        text_color,
+        cursor_alpha
+    )
+>>>>>>> f532cd2a9420360ab5e50d69095563711595ba2e
 end
 
 -- 仮想バッファの合成結果を現在オブジェクトへ戻し、後続効果へ渡す。

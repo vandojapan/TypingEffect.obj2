@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 --information:TypingEffect checker v0.5.4
+=======
+--information:TypingEffect checker v0.5.3
+>>>>>>> f532cd2a9420360ab5e50d69095563711595ba2e
 --font@font_name:フォント,メイリオ
 --track@font_size:文字サイズ,12,120,36,1
 --color@text_color:文字色,0xffffff

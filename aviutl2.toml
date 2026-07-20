@@ -62,6 +62,7 @@ placement_method = "copy"
 
 [development]
 aviutl2_version = "latest"
+<<<<<<< HEAD
 install_dir = "./.aviutl2-cli/development"
 
 [preview]
@@ -78,3 +79,9 @@ package_information = "TypingEffect v{version}"
 zip_name = "TypingEffect_v{version}"
 profile = "release"
 include = ["typing_effect_mod2", "typing_effect_obj2", "checker_obj2", "readme", "changelog", "license", "license_aviutl2_rs", "license_lindera", "license_ipadic", "license_pinyin", "license_cc_cedict"]
+=======
+
+[release]
+package_id = "TypingEffect"
+zip_name = "TypingEffect_v{version}"
+>>>>>>> f532cd2a9420360ab5e50d69095563711595ba2e

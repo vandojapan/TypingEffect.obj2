@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 TypingEffect v0.5.4
+=======
+TypingEffect v0.5.3
+>>>>>>> f532cd2a9420360ab5e50d69095563711595ba2e
 ===================
 
 ・verify-exports.ps1のdumpbin.exe依存を廃止
