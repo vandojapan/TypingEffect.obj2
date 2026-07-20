@@ -1,7 +1,7 @@
 [package]
 name = "typing_effect_mod2"
-version = "0.4.1"
-edition = "2021"
+version = "0.5.3"
+edition = "2024"
 license = "MIT"
 publish = false
 
@@ -10,7 +10,9 @@ name = "typing_effect"
 crate-type = ["cdylib"]
 
 [dependencies]
-lindera = { version = "=4.0.0", features = ["embed-ipadic"] }
+aviutl2 = { version = "=0.40.0" }
+lindera = { version = "=4.0.0", default-features = false, features = ["embed-ipadic", "embed-cc-cedict"] }
+pinyin = { version = "=0.11.0", default-features = false, features = ["plain"] }
 
 [profile.release]
 lto = "fat"
