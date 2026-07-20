@@ -448,6 +448,104 @@ local function draw_rectangle(x, y, w, h, color, alpha)
     }, 4)
 end
 
+-- text.layoutの高さはフォントの行ボックスであり、実際の字面より大きい場合がある。
+-- 短い基準文字を描画して不透明ピクセルを走査し、字面の高さと中心位置を取得する。
+local function cursor_ink_metrics()
+    local metric_text = ""
+    local metric_count = 0
+    for _, ch in ipairs(utf8_chars(confirmed)) do
+        if ch ~= " " and ch ~= "　" and ch ~= "\t" and ch ~= "\r" and ch ~= "\n" then
+            metric_text = metric_text .. ch
+            metric_count = metric_count + 1
+            if metric_count >= 6 then
+                break
+            end
+        end
+    end
+    if metric_text == "" then
+        metric_text = "Hg"
+    end
+
+    local cache_key = table.concat({
+        font_name,
+        tostring(font_size),
+        tostring(decoration),
+        tostring(bold),
+        tostring(italic),
+        tostring(char_spacing),
+        tostring(line_spacing),
+        metric_text
+    }, "\t")
+    local cache_slot = "TypingEffect.cursor_metrics." .. tostring(obj.id)
+    if global then
+        local cached = global[cache_slot]
+        if cached then
+            local saved_key, saved_h, saved_offset =
+                string.match(cached, "^(.-)\n([%d%.%-]+),([%d%.%-]+)$")
+            if saved_key == cache_key then
+                return tonumber(saved_h), tonumber(saved_offset)
+            end
+        end
+    end
+
+    if not obj.load("text", metric_text) then
+        return nil, nil
+    end
+    obj.pixeloption("get", "object")
+    local pixel_w, pixel_h = obj.getpixel()
+    if not pixel_w or not pixel_h or pixel_w < 1 or pixel_h < 1 then
+        return nil, nil
+    end
+
+    -- 最大でも一文字幅あたり約16点を調べ、巨大な文字サイズでの負荷を抑える。
+    local x_step = math.max(1, math.floor(font_size / 16))
+    local function row_has_ink(y)
+        local x = 0
+        while x < pixel_w do
+            local _, alpha = obj.getpixel(x, y, "col")
+            if (alpha or 0) > 0.02 then
+                return true
+            end
+            x = x + x_step
+        end
+        if (pixel_w - 1) % x_step ~= 0 then
+            local _, alpha = obj.getpixel(pixel_w - 1, y, "col")
+            return (alpha or 0) > 0.02
+        end
+        return false
+    end
+
+    local ink_top = nil
+    for y = 0, pixel_h - 1 do
+        if row_has_ink(y) then
+            ink_top = y
+            break
+        end
+    end
+    if not ink_top then
+        return nil, nil
+    end
+
+    local ink_bottom = ink_top
+    for y = pixel_h - 1, ink_top, -1 do
+        if row_has_ink(y) then
+            ink_bottom = y
+            break
+        end
+    end
+
+    local padding = math.max(1, math.floor(font_size * 0.03 + 0.5))
+    ink_top = math.max(0, ink_top - padding)
+    ink_bottom = math.min(pixel_h - 1, ink_bottom + padding)
+    local metric_h = math.max(1, ink_bottom - ink_top + 1)
+    local metric_offset = (ink_top + ink_bottom + 1) / 2 - pixel_h / 2
+
+    if global then
+        global[cache_slot] = cache_key .. "\n" .. metric_h .. "," .. metric_offset
+    end
+    return metric_h, metric_offset
+end
+
 -- 点滅カーソルを文字列へ加えると、その有無で中央揃えの幅が変わる。
 -- 最長の表示状態を基準に固定キャンバスを作り、カーソルと下線は別描画する。
 local max_text_w = 1
@@ -539,19 +637,15 @@ if show_cursor and (cursor_active or keep_cursor) then
     end
 end
 if draw_cursor and cursor_alpha > 0 then
-<<<<<<< HEAD
-    -- 一部のOTFフォントでは font_size 基準だとカーソルが高すぎたり低すぎたりする。
-    -- 実際のレイアウト高 current_h を基準にして、文字の高さへ追従させる。
-    local cursor_h = math.max(1, current_h)
+    -- 実際の字面メトリクスを優先し、取得出来ない場合だけ文字サイズ基準へ戻す。
+    local cursor_h = math.max(1, math.min(current_h, font_size * 0.9))
     local cursor_x = left_edge + current_w + cursor_gap + cursor_thickness / 2
-    local cursor_y = top_edge + current_h / 2
-    draw_rectangle(cursor_x, cursor_y, cursor_thickness, cursor_h, text_color, cursor_alpha)
-=======
-    -- 一部のOTFフォントではfont_sizeと実際の描画高が一致しない。
-    -- 実際の文字レイアウト高を基準にカーソルの高さと位置を決定する。
-    local cursor_h = math.max(1, current_h)
-    local cursor_x = left_edge + current_w + cursor_gap + cursor_thickness / 2
-    local cursor_y = top_edge + current_h / 2
+    local cursor_y = top_edge + cursor_h / 2
+    local metric_h, metric_offset = cursor_ink_metrics()
+    if metric_h and metric_offset then
+        cursor_h = metric_h
+        cursor_y = text_center_y + metric_offset
+    end
     draw_rectangle(
         cursor_x,
         cursor_y,
@@ -560,7 +654,6 @@ if draw_cursor and cursor_alpha > 0 then
         text_color,
         cursor_alpha
     )
->>>>>>> f532cd2a9420360ab5e50d69095563711595ba2e
 end
 
 -- 仮想バッファの合成結果を現在オブジェクトへ戻し、後続効果へ渡す。
