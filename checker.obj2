@@ -1,4 +1,4 @@
---information:TypingEffect 形態素解析エンジン診断 v0.4.0
+--information:TypingEffect checker v0.5.3
 --font@font_name:フォント,メイリオ
 --track@font_size:文字サイズ,12,120,36,1
 --color@text_color:文字色,0xffffff
@@ -14,7 +14,7 @@ else
     if diagnose_ok then
         status = tostring(result)
     else
-        status = "NG: 診断関数の実行に失敗しました\n" .. tostring(result)
+        status = "NG: checkerの実行に失敗しました\n" .. tostring(result)
     end
 end
 

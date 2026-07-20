@@ -1,4 +1,4 @@
---information:TypingEffect v0.4.0
+--information:TypingEffect v0.5.3
 --group:文章,true
 --text@source:文章,今日はいい天気です
 --select@language:言語,日本語=0,中文=1
@@ -180,6 +180,16 @@ local function simulate_romaji(input)
     return states, fixed
 end
 
+local function simulate_literal_input(input)
+    local states = {}
+    local current = ""
+    for _, key in ipairs(utf8_chars(input or "")) do
+        current = current .. key
+        states[#states + 1] = current
+    end
+    return states, current
+end
+
 local kata_to_hira = {}
 do
     local hira = utf8_chars("ぁあぃいぅうぇえぉおかがきぎくぐけげこござじずぜぞさしすせそただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔ")
@@ -356,12 +366,19 @@ end
 for _, raw_segment in ipairs(split_source(resolved_source)) do
     if raw_segment ~= "" then
         local input, target = parse_segment(raw_segment)
-        if not input then
+        local selected_language = language or 0
+        if not input and selected_language == 0 then
             input = kana_to_romaji(target)
         end
 
         if input then
-            local states, reading = simulate_romaji(input)
+            local states, reading
+            if selected_language == 1 then
+                -- 中文では拼音・注音を変換せず、そのまま未確定文字として表示する。
+                states, reading = simulate_literal_input(input)
+            else
+                states, reading = simulate_romaji(input)
+            end
             if target == "" then
                 target = reading
             end
