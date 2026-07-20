@@ -1,0 +1,552 @@
+--information:TypingEffect v0.5.4
+--group:文章,true
+--text@source:文章,今日はいい天気です
+--select@language:言語,日本語=0,中文=1
+--check@auto_analyze:自動解析,true
+--track@typing_speed:入力速度,1,60,12,0.1
+--track@conversion_wait:変換待ち,0,2000,350,10,待ちなし
+--track@section_wait:文節間隔,0,2000,120,10,待ちなし
+--group:書式,true
+--font@font_name:フォント,メイリオ
+--track@font_size:文字サイズ,8,500,72,1
+--select@decoration:装飾,標準=0,影付き=1,影付き(薄)=2,縁取り=3,縁取り(細)=4,縁取り(太)=5,縁取り(角)=6
+--color@text_color:文字色,0xffffff
+--color@edge_color:影・縁色,0x000000
+--check@bold:太字,false
+--check@italic:斜体,false
+--track@char_spacing:字間,-100,300,0,1
+--track@line_spacing:行間,-100,300,0,1
+--select@alignment:揃え,左揃え=0,中央揃え=1,右揃え=2
+--group:カーソル,false
+--check@show_cursor:カーソルを表示,true
+--check@keep_cursor:完了後も表示,false
+--track@cursor_blink_speed:速さ,0,15,1,0.01
+--track@cursor_blink_ratio:点滅割合,0,100,50,1
+--track@cursor_on_speed:点灯速度,0,100,100,1
+--track@cursor_off_speed:消灯速度,0,100,75,1
+--track@cursor_thickness:カーソルの太さ,1,100,3,1
+--group:未確定文字,false
+--check@show_underline:変換前に下線を表示,true
+--track@underline_thickness:下線の太さ,1,12,2,1
+--group
+
+local function utf8_chars(value)
+    local result = {}
+    local i = 1
+    while i <= #value do
+        local b = string.byte(value, i)
+        local size = 1
+        if b >= 240 then
+            size = 4
+        elseif b >= 224 then
+            size = 3
+        elseif b >= 192 then
+            size = 2
+        end
+        result[#result + 1] = string.sub(value, i, i + size - 1)
+        i = i + size
+    end
+    return result
+end
+
+local romaji_kana = {
+    a="あ", i="い", u="う", e="え", o="お",
+    ka="か", ki="き", ku="く", ke="け", ko="こ",
+    ga="が", gi="ぎ", gu="ぐ", ge="げ", go="ご",
+    sa="さ", shi="し", si="し", su="す", se="せ", so="そ",
+    za="ざ", ji="じ", zi="じ", zu="ず", ze="ぜ", zo="ぞ", vu="ゔ",
+    ta="た", chi="ち", ti="ち", tsu="つ", tu="つ", te="て", to="と",
+    da="だ", di="ぢ", du="づ", de="で", ["do"]="ど",
+    na="な", ni="に", nu="ぬ", ne="ね", no="の",
+    ha="は", hi="ひ", fu="ふ", hu="ふ", he="へ", ho="ほ",
+    ba="ば", bi="び", bu="ぶ", be="べ", bo="ぼ",
+    pa="ぱ", pi="ぴ", pu="ぷ", pe="ぺ", po="ぽ",
+    ma="ま", mi="み", mu="む", me="め", mo="も",
+    ya="や", yu="ゆ", yo="よ",
+    ra="ら", ri="り", ru="る", re="れ", ro="ろ",
+    wa="わ", wo="を",
+    kya="きゃ", kyu="きゅ", kyo="きょ",
+    gya="ぎゃ", gyu="ぎゅ", gyo="ぎょ",
+    sha="しゃ", shu="しゅ", sho="しょ", sya="しゃ", syu="しゅ", syo="しょ",
+    ja="じゃ", ju="じゅ", jo="じょ", jya="じゃ", jyu="じゅ", jyo="じょ",
+    cha="ちゃ", chu="ちゅ", cho="ちょ", cya="ちゃ", cyu="ちゅ", cyo="ちょ",
+    nya="にゃ", nyu="にゅ", nyo="にょ",
+    hya="ひゃ", hyu="ひゅ", hyo="ひょ",
+    bya="びゃ", byu="びゅ", byo="びょ",
+    pya="ぴゃ", pyu="ぴゅ", pyo="ぴょ",
+    mya="みゃ", myu="みゅ", myo="みょ",
+    rya="りゃ", ryu="りゅ", ryo="りょ",
+    fa="ふぁ", fi="ふぃ", fe="ふぇ", fo="ふぉ",
+    wi="うぃ", we="うぇ", who="うぉ",
+    she="しぇ", je="じぇ", che="ちぇ",
+    tsa="つぁ", tsi="つぃ", tse="つぇ", tso="つぉ",
+    thi="てぃ", thu="てゅ", dhi="でぃ", dhu="でゅ",
+    kwa="くぁ", kwi="くぃ", kwe="くぇ", kwo="くぉ",
+    gwa="ぐぁ", gwi="ぐぃ", gwe="ぐぇ", gwo="ぐぉ",
+    xa="ぁ", xi="ぃ", xu="ぅ", xe="ぇ", xo="ぉ",
+    la="ぁ", li="ぃ", lu="ぅ", le="ぇ", lo="ぉ",
+    xya="ゃ", xyu="ゅ", xyo="ょ", lya="ゃ", lyu="ゅ", lyo="ょ",
+    xtu="っ", ltu="っ", xwa="ゎ", lwa="ゎ"
+}
+
+local prefixes = {}
+for key, _ in pairs(romaji_kana) do
+    for i = 1, #key - 1 do
+        prefixes[string.sub(key, 1, i)] = true
+    end
+end
+prefixes["n"] = true
+
+local direct_keys = {
+    [","]="、", ["."]="。", ["!"]="！", ["?"]="？",
+    ["-"]="ー", [" "]="　", ["/"]="/", ["\n"]="\n"
+}
+
+local function is_consonant(ch)
+    return string.find("bcdfghjklmnpqrstvwxyz", ch, 1, true) ~= nil
+end
+
+local function simulate_romaji(input)
+    local states = {}
+    local fixed = ""
+    local pending = ""
+    local keys = utf8_chars(string.lower(input or ""))
+
+    for _, key in ipairs(keys) do
+        if #key > 1 then
+            if pending == "n" then
+                fixed = fixed .. "ん"
+                pending = ""
+            elseif pending ~= "" then
+                fixed = fixed .. pending
+                pending = ""
+            end
+            fixed = fixed .. key
+        elseif direct_keys[key] then
+            if pending == "n" then
+                fixed = fixed .. "ん"
+            elseif pending ~= "" then
+                fixed = fixed .. pending
+            end
+            pending = ""
+            fixed = fixed .. direct_keys[key]
+        else
+            pending = pending .. key
+            local resolving = true
+            while resolving and pending ~= "" do
+                resolving = false
+                local first = string.sub(pending, 1, 1)
+                local second = string.sub(pending, 2, 2)
+
+                if #pending >= 2 and first == second and first ~= "n" and is_consonant(first) then
+                    fixed = fixed .. "っ"
+                    pending = string.sub(pending, 2)
+                    resolving = true
+                elseif string.sub(pending, 1, 2) == "n'" then
+                    fixed = fixed .. "ん"
+                    pending = string.sub(pending, 3)
+                    resolving = true
+                elseif #pending >= 2 and first == "n" and second == "n" then
+                    fixed = fixed .. "ん"
+                    pending = string.sub(pending, 2)
+                    resolving = true
+                elseif #pending >= 2 and first == "n" and is_consonant(second) and second ~= "y" then
+                    fixed = fixed .. "ん"
+                    pending = string.sub(pending, 2)
+                    resolving = true
+                elseif pending ~= "n" and romaji_kana[pending] then
+                    fixed = fixed .. romaji_kana[pending]
+                    pending = ""
+                elseif prefixes[pending] then
+                    -- 母音待ちの子音は英字のまま表示する。
+                elseif #pending > 1 then
+                    fixed = fixed .. first
+                    pending = string.sub(pending, 2)
+                    resolving = true
+                end
+            end
+        end
+        states[#states + 1] = fixed .. pending
+    end
+
+    if pending == "n" then
+        fixed = fixed .. "ん"
+    elseif pending ~= "" then
+        fixed = fixed .. pending
+    end
+    if #states == 0 or states[#states] ~= fixed then
+        states[#states + 1] = fixed
+    end
+    return states, fixed
+end
+
+local function simulate_literal_input(input)
+    local states = {}
+    local current = ""
+    for _, key in ipairs(utf8_chars(input or "")) do
+        current = current .. key
+        states[#states + 1] = current
+    end
+    return states, current
+end
+
+local kata_to_hira = {}
+do
+    local hira = utf8_chars("ぁあぃいぅうぇえぉおかがきぎくぐけげこござじずぜぞさしすせそただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんゔ")
+    local kata = utf8_chars("ァアィイゥウェエォオカガキギクグケゲコゴザジズゼゾサシスセソタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴ")
+    for i = 1, math.min(#hira, #kata) do
+        kata_to_hira[kata[i]] = hira[i]
+    end
+end
+
+local kana_romaji = {
+    ["あ"]="a", ["い"]="i", ["う"]="u", ["え"]="e", ["お"]="o",
+    ["か"]="ka", ["き"]="ki", ["く"]="ku", ["け"]="ke", ["こ"]="ko",
+    ["が"]="ga", ["ぎ"]="gi", ["ぐ"]="gu", ["げ"]="ge", ["ご"]="go",
+    ["さ"]="sa", ["し"]="shi", ["す"]="su", ["せ"]="se", ["そ"]="so",
+    ["ざ"]="za", ["じ"]="ji", ["ず"]="zu", ["ぜ"]="ze", ["ぞ"]="zo",
+    ["た"]="ta", ["ち"]="chi", ["つ"]="tsu", ["て"]="te", ["と"]="to",
+    ["だ"]="da", ["ぢ"]="di", ["づ"]="du", ["で"]="de", ["ど"]="do",
+    ["な"]="na", ["に"]="ni", ["ぬ"]="nu", ["ね"]="ne", ["の"]="no",
+    ["は"]="ha", ["ひ"]="hi", ["ふ"]="fu", ["へ"]="he", ["ほ"]="ho",
+    ["ば"]="ba", ["び"]="bi", ["ぶ"]="bu", ["べ"]="be", ["ぼ"]="bo",
+    ["ぱ"]="pa", ["ぴ"]="pi", ["ぷ"]="pu", ["ぺ"]="pe", ["ぽ"]="po",
+    ["ま"]="ma", ["み"]="mi", ["む"]="mu", ["め"]="me", ["も"]="mo",
+    ["や"]="ya", ["ゆ"]="yu", ["よ"]="yo",
+    ["ら"]="ra", ["り"]="ri", ["る"]="ru", ["れ"]="re", ["ろ"]="ro",
+    ["わ"]="wa", ["ゐ"]="wi", ["ゑ"]="we", ["を"]="wo", ["ゔ"]="vu",
+    ["きゃ"]="kya", ["きゅ"]="kyu", ["きょ"]="kyo",
+    ["ぎゃ"]="gya", ["ぎゅ"]="gyu", ["ぎょ"]="gyo",
+    ["しゃ"]="sha", ["しゅ"]="shu", ["しょ"]="sho",
+    ["じゃ"]="ja", ["じゅ"]="ju", ["じょ"]="jo",
+    ["ちゃ"]="cha", ["ちゅ"]="chu", ["ちょ"]="cho",
+    ["にゃ"]="nya", ["にゅ"]="nyu", ["にょ"]="nyo",
+    ["ひゃ"]="hya", ["ひゅ"]="hyu", ["ひょ"]="hyo",
+    ["びゃ"]="bya", ["びゅ"]="byu", ["びょ"]="byo",
+    ["ぴゃ"]="pya", ["ぴゅ"]="pyu", ["ぴょ"]="pyo",
+    ["みゃ"]="mya", ["みゅ"]="myu", ["みょ"]="myo",
+    ["りゃ"]="rya", ["りゅ"]="ryu", ["りょ"]="ryo",
+    ["ふぁ"]="fa", ["ふぃ"]="fi", ["ふぇ"]="fe", ["ふぉ"]="fo",
+    ["うぃ"]="wi", ["うぇ"]="we", ["うぉ"]="who",
+    ["しぇ"]="she", ["じぇ"]="je", ["ちぇ"]="che",
+    ["つぁ"]="tsa", ["つぃ"]="tsi", ["つぇ"]="tse", ["つぉ"]="tso",
+    ["てぃ"]="thi", ["てゅ"]="thu", ["でぃ"]="dhi", ["でゅ"]="dhu",
+    ["ぁ"]="xa", ["ぃ"]="xi", ["ぅ"]="xu", ["ぇ"]="xe", ["ぉ"]="xo",
+    ["ゃ"]="xya", ["ゅ"]="xyu", ["ょ"]="xyo", ["ゎ"]="xwa",
+    ["、"]=",", ["。"]=".", ["！"]="!", ["？"]="?", ["ー"]="-",
+    [" "]=" ", ["　"]=" ", ["\n"]="\n"
+}
+
+local function kana_to_romaji(text)
+    local raw_chars = utf8_chars(text)
+    local chars = {}
+    for i, ch in ipairs(raw_chars) do
+        chars[i] = kata_to_hira[ch] or ch
+    end
+    local result = {}
+    local i = 1
+    while i <= #chars do
+        local ch = chars[i]
+        local pair = i < #chars and (ch .. chars[i + 1]) or nil
+        local roma = pair and kana_romaji[pair] or nil
+        local consumed = roma and 2 or 1
+        if not roma then
+            roma = kana_romaji[ch]
+        end
+
+        if ch == "っ" then
+            local next_pair = i + 2 <= #chars and (chars[i + 1] .. chars[i + 2]) or nil
+            local next_roma = (next_pair and kana_romaji[next_pair]) or kana_romaji[chars[i + 1] or ""]
+            if next_roma and is_consonant(string.sub(next_roma, 1, 1)) then
+                result[#result + 1] = string.sub(next_roma, 1, 1)
+            else
+                result[#result + 1] = "xtu"
+            end
+            consumed = 1
+        elseif ch == "ん" then
+            local next_pair = i + 2 <= #chars and (chars[i + 1] .. chars[i + 2]) or nil
+            local next_roma = (next_pair and kana_romaji[next_pair]) or kana_romaji[chars[i + 1] or ""] or ""
+            local initial = string.sub(next_roma, 1, 1)
+            if string.find("aiueoyn", initial, 1, true) then
+                result[#result + 1] = "n'"
+            else
+                result[#result + 1] = "n"
+            end
+            consumed = 1
+        elseif roma then
+            result[#result + 1] = roma
+        else
+            return nil
+        end
+        i = i + consumed
+    end
+    return table.concat(result)
+end
+
+local function split_source(text)
+    local segments = {}
+    local buffer = {}
+    local i = 1
+    local in_input_tag = false
+    while i <= #text do
+        local ch = string.sub(text, i, i)
+        local next_ch = string.sub(text, i + 1, i + 1)
+        local tag_open = string.sub(text, i, i + 2)
+        local tag_close = string.sub(text, i, i + 3)
+        if tag_open == "<i>" then
+            buffer[#buffer + 1] = tag_open
+            in_input_tag = true
+            i = i + 3
+        elseif in_input_tag and (tag_close == "</i>" or tag_close == "<i/>") then
+            buffer[#buffer + 1] = tag_close
+            in_input_tag = false
+            i = i + 4
+        elseif ch == "\\" and next_ch == "/" then
+            buffer[#buffer + 1] = "/"
+            i = i + 2
+        elseif ch == "/" and not in_input_tag then
+            segments[#segments + 1] = table.concat(buffer)
+            buffer = {}
+            i = i + 1
+        else
+            buffer[#buffer + 1] = ch
+            i = i + 1
+        end
+    end
+    segments[#segments + 1] = table.concat(buffer)
+    return segments
+end
+
+local function parse_segment(segment)
+    local input = nil
+    local target = segment
+    if string.sub(segment, 1, 3) == "<i>" then
+        local close_s, close_e = string.find(segment, "</i>", 4, true)
+        if not close_s then
+            close_s, close_e = string.find(segment, "<i/>", 4, true)
+        end
+        if close_s then
+            input = string.sub(segment, 4, close_s - 1)
+            target = string.sub(segment, close_e + 1)
+        end
+    end
+    return input, target
+end
+
+local events = {}
+local function add_event(text, duration, prefix, preedit, underline, typing)
+    events[#events + 1] = {
+        text = text,
+        duration = math.max(0, duration or 0),
+        prefix = prefix or "",
+        preedit = preedit or "",
+        underline = underline or false,
+        typing = typing or false
+    }
+end
+
+local confirmed = ""
+local key_duration = 1 / math.max(typing_speed, 0.001)
+local convert_duration = conversion_wait / 1000
+local gap_duration = section_wait / 1000
+
+local resolved_source = source or ""
+-- v0.3.0以前から配置済みのオブジェクトには新設設定が保存されていない。
+-- nilは既定値ONとして扱い、オブジェクトを置き直さなくても自動解析を有効にする。
+if auto_analyze ~= false then
+    local module_ok, engine = pcall(obj.module, "TypingEffect")
+    if module_ok and engine then
+        local analyze_ok, analyzed = pcall(engine.annotate, resolved_source, language or 0)
+        if analyze_ok and type(analyzed) == "string" and analyzed ~= "" then
+            resolved_source = analyzed
+        end
+    end
+end
+
+for _, raw_segment in ipairs(split_source(resolved_source)) do
+    if raw_segment ~= "" then
+        local input, target = parse_segment(raw_segment)
+        local selected_language = language or 0
+        if not input and selected_language == 0 then
+            input = kana_to_romaji(target)
+        end
+
+        if input then
+            local states, reading
+            if selected_language == 1 then
+                -- 中文では拼音・注音を変換せず、そのまま未確定文字として表示する。
+                states, reading = simulate_literal_input(input)
+            else
+                states, reading = simulate_romaji(input)
+            end
+            if target == "" then
+                target = reading
+            end
+            for _, state in ipairs(states) do
+                add_event(confirmed .. state, key_duration, confirmed, state, true, true)
+            end
+            add_event(confirmed .. reading, convert_duration, confirmed, reading, true, false)
+        else
+            local direct = ""
+            for _, ch in ipairs(utf8_chars(target)) do
+                direct = direct .. ch
+                add_event(confirmed .. direct, key_duration, confirmed, direct, false, true)
+            end
+        end
+
+        confirmed = confirmed .. target
+        add_event(confirmed, gap_duration)
+    end
+end
+
+local total_duration = 0
+for _, event in ipairs(events) do
+    total_duration = total_duration + event.duration
+end
+
+local display = confirmed
+local cursor_time = 0
+local elapsed = math.max(0, obj.time)
+local cursor_active = elapsed < total_duration
+local active_event = nil
+for _, event in ipairs(events) do
+    if elapsed < cursor_time + event.duration then
+        display = event.text
+        active_event = event
+        break
+    end
+    cursor_time = cursor_time + event.duration
+end
+obj.setfont(font_name, font_size, decoration, text_color, edge_color, bold, italic, char_spacing, line_spacing)
+
+local function text_layout(text)
+    if text == "" then
+        return 0, math.max(1, font_size)
+    end
+    local w, h = obj.load("text.layout", text, 0, 0)
+    return math.max(0, w or 0), math.max(1, h or font_size)
+end
+
+local function draw_rectangle(x, y, w, h, color, alpha)
+    if w <= 0 or h <= 0 then
+        return
+    end
+    alpha = math.max(0, math.min(1, alpha or 1))
+    local r, g, b = RGB(color)
+    r = r / 255 * alpha
+    g = g / 255 * alpha
+    b = b / 255 * alpha
+    local left = x - w / 2
+    local right = x + w / 2
+    local top = y - h / 2
+    local bottom = y + h / 2
+    obj.drawpoly({
+        { left,  top,    0, r, g, b, alpha },
+        { right, top,    0, r, g, b, alpha },
+        { right, bottom, 0, r, g, b, alpha },
+        { left,  bottom, 0, r, g, b, alpha }
+    }, 4)
+end
+
+-- 点滅カーソルを文字列へ加えると、その有無で中央揃えの幅が変わる。
+-- 最長の表示状態を基準に固定キャンバスを作り、カーソルと下線は別描画する。
+local max_text_w = 1
+local max_text_h = math.max(1, font_size)
+for _, event in ipairs(events) do
+    local w, h = text_layout(event.text)
+    max_text_w = math.max(max_text_w, w)
+    max_text_h = math.max(max_text_h, h)
+end
+local final_w, final_h = text_layout(confirmed)
+max_text_w = math.max(max_text_w, final_w)
+max_text_h = math.max(max_text_h, final_h)
+
+local cursor_gap = math.max(1, font_size * 0.08)
+local side_padding = math.max(4, cursor_thickness + cursor_gap + 2)
+local top_padding = math.max(4, font_size * 0.08)
+local bottom_padding = math.max(top_padding, underline_thickness + 3)
+local canvas_w = math.max(1, math.floor(max_text_w + side_padding * 2 + 0.5))
+local canvas_h = math.max(1, math.floor(max_text_h + top_padding + bottom_padding + 0.5))
+
+local anchor_x = 0
+if alignment == 0 then
+    anchor_x = -max_text_w / 2
+elseif alignment == 2 then
+    anchor_x = max_text_w / 2
+end
+local top_edge = -canvas_h / 2 + top_padding
+
+obj.setoption("drawtarget", "tempbuffer", canvas_w, canvas_h)
+local current_w, current_h = text_layout(display)
+local left_edge = anchor_x
+if alignment == 1 then
+    left_edge = anchor_x - current_w / 2
+elseif alignment == 2 then
+    left_edge = anchor_x - current_w
+end
+local text_center_x = left_edge + current_w / 2
+local text_center_y = top_edge + current_h / 2
+
+-- 仮想バッファへのdraw()では、文字揃えが設定したobj.cx/obj.cyは反映されない。
+-- 文字画像そのものの中心を描画座標へ渡し、上下左右のクリッピングを防ぐ。
+obj.load("text", display)
+obj.draw(text_center_x, text_center_y, 0)
+
+if show_underline and active_event and active_event.underline and active_event.preedit ~= "" then
+    local prefix_w = 0
+    if active_event.prefix ~= "" then
+        prefix_w = text_layout(active_event.prefix)
+    end
+    local preedit_w = math.max(1, current_w - prefix_w)
+    local underline_x = left_edge + prefix_w + preedit_w / 2
+    local underline_y = top_edge + current_h + underline_thickness / 2
+    draw_rectangle(underline_x, underline_y, preedit_w, underline_thickness, text_color)
+end
+
+local draw_cursor = false
+local cursor_alpha = 1
+if show_cursor and (cursor_active or keep_cursor) then
+    draw_cursor = true
+    if active_event and active_event.typing then
+        -- キー入力が進行している間は、点滅位相に関係なく常時点灯する。
+        cursor_alpha = 1
+    elseif cursor_blink_speed > 0 then
+        -- exedit.anm「@点滅」と同じ、点灯/消灯区間と遷移速度の計算。
+        local frame_rate = math.max(1, obj.framerate)
+        local period_frames = math.floor(frame_rate / cursor_blink_speed + 0.5)
+        local off_frames = math.floor(period_frames * (100 - cursor_blink_ratio) / 100)
+        local on_frames = math.floor(period_frames * cursor_blink_ratio / 100)
+        off_frames = math.max(1, off_frames)
+        on_frames = math.max(1, on_frames)
+        local off_time = off_frames / frame_rate
+        local on_time = on_frames / frame_rate
+        local phase = (elapsed + 0.0001) % (off_time + on_time)
+        if phase < on_time then
+            local fade_time = on_time * (100 - cursor_on_speed) / 100
+            local fade_position = phase + 1 / frame_rate
+            if fade_time > 0 and fade_position < fade_time then
+                cursor_alpha = fade_position / fade_time
+            end
+        else
+            local off_position = phase - on_time + 1 / frame_rate
+            local fade_time = off_time * (100 - cursor_off_speed) / 100
+            if fade_time > 0 and off_position < fade_time then
+                cursor_alpha = 1 - off_position / fade_time
+            else
+                cursor_alpha = 0
+            end
+        end
+    end
+end
+if draw_cursor and cursor_alpha > 0 then
+    -- 一部のOTFフォントでは font_size 基準だとカーソルが高すぎたり低すぎたりする。
+    -- 実際のレイアウト高 current_h を基準にして、文字の高さへ追従させる。
+    local cursor_h = math.max(1, current_h)
+    local cursor_x = left_edge + current_w + cursor_gap + cursor_thickness / 2
+    local cursor_y = top_edge + current_h / 2
+    draw_rectangle(cursor_x, cursor_y, cursor_thickness, cursor_h, text_color, cursor_alpha)
+end
+
+-- 仮想バッファの合成結果を現在オブジェクトへ戻し、後続効果へ渡す。
+obj.copybuffer("object", "tempbuffer")
+obj.setoption("draw_state", false)
