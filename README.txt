@@ -5,12 +5,12 @@ AviUtl2向けIMEタイピングアニメーションです。
 名称を「TypingEffect」へ変更し、形態素解析エンジンをMeCabからLinderaへ置き換えます。
 
 ■ 今回の範囲
-
+ 
+ 
 ・日本語: Lindera 4.0.0 + 埋め込みIPADICで自動解析
 ・中文: 言語プルダウンを追加。自動解析は次版で実装予定
 ・中文でも <i>pinyin</i>漢字 / <i>注音</i>漢字 の手動指定は利用可能
 ・MeCab DLL、mecabrc、外部辞書フォルダーは不要
-
 ■ 完成時の配置
 
   TypingEffect.obj2
