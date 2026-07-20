@@ -1,0 +1,37 @@
+TypingEffect v0.5.3
+===================
+
+・verify-exports.ps1のdumpbin.exe依存を廃止
+・PowerShell内蔵のPE32+解析でx64形式を検査
+・PEエクスポートテーブルから必須3関数を検査
+・通常のPowerShellからau2 devを実行可能に変更
+・check-syntax.ps1へdumpbin依存の回帰チェックを追加
+
+TypingEffect v0.5.2
+===================
+
+・aviutl2 0.40.0の既定機能を有効化
+・module内部で必要になるgeneric / filterの未解決エラーを修正
+・check-syntax.ps1へdefault-features無効化の回帰チェックを追加
+・READMEへビルドエラーの原因と正しい依存設定を追記
+
+TypingEffect v0.5.1
+
+- build.ps1をWindows PowerShell 5.1でも安全に読めるASCII構成へ変更
+- PowerShell ASTによるcheck-syntax.ps1を追加
+- Cargo.tomlをcargo metadataで事前検査
+- verify-exports.ps1もASCII構成へ変更
+
+TypingEffect v0.5.0
+===================
+
+・中文の自動解析を実装
+・Lindera CC-CEDICTをTypingEffect.mod2へ埋め込み
+・簡体字・繁体字の単語分割と拼音取得に対応
+・声調数字を除去した拼音IME入力列を生成
+・ü / u: を v に正規化
+・a/e/o開始音節の前へ必要に応じてアポストロフィを挿入
+・辞書未知語へpinyin 0.11.0の文字単位フォールバックを追加
+・中文モードの入力中表示を拼音・注音そのままに変更
+・checkerで日本語と中文を同時診断
+・CC-CEDICTとpinyinのライセンス表示を追加

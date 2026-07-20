@@ -1,0 +1,80 @@
+[project]
+id = "typing-effect"
+name = "TypingEffect"
+version = "0.5.3"
+
+[artifacts.typing_effect_mod2]
+source = "TypingEffect.mod2"
+destination = "Script/TypingEffect/TypingEffect.mod2"
+build = "powershell -NoProfile -ExecutionPolicy Bypass -File ./source/build.ps1"
+placement_method = "copy"
+
+[artifacts.typing_effect_obj2]
+source = "TypingEffect.obj2"
+destination = "Script/TypingEffect/TypingEffect.obj2"
+placement_method = "copy"
+
+[artifacts.checker_obj2]
+source = "checker.obj2"
+destination = "Script/TypingEffect/checker.obj2"
+placement_method = "copy"
+
+[artifacts.readme]
+source = "README.txt"
+destination = "Script/TypingEffect/README.txt"
+placement_method = "copy"
+
+[artifacts.changelog]
+source = "CHANGELOG.txt"
+destination = "Script/TypingEffect/CHANGELOG.txt"
+placement_method = "copy"
+
+[artifacts.license]
+source = "LICENSE.txt"
+destination = "Script/TypingEffect/LICENSE.txt"
+placement_method = "copy"
+
+[artifacts.license_aviutl2_rs]
+source = "licenses/aviutl2-rs_LICENSE.txt"
+destination = "Script/TypingEffect/licenses/aviutl2-rs_LICENSE.txt"
+placement_method = "copy"
+
+[artifacts.license_lindera]
+source = "licenses/Lindera_LICENSE.txt"
+destination = "Script/TypingEffect/licenses/Lindera_LICENSE.txt"
+placement_method = "copy"
+
+[artifacts.license_ipadic]
+source = "licenses/IPADIC_COPYING.txt"
+destination = "Script/TypingEffect/licenses/IPADIC_COPYING.txt"
+placement_method = "copy"
+
+
+[artifacts.license_pinyin]
+source = "licenses/pinyin_LICENSE.txt"
+destination = "Script/TypingEffect/licenses/pinyin_LICENSE.txt"
+placement_method = "copy"
+
+[artifacts.license_cc_cedict]
+source = "licenses/CC-CEDICT_LICENSE.txt"
+destination = "Script/TypingEffect/licenses/CC-CEDICT_LICENSE.txt"
+placement_method = "copy"
+
+[development]
+aviutl2_version = "latest"
+install_dir = "./.aviutl2-cli/development"
+
+[preview]
+aviutl2_version = "latest"
+install_dir = "./.aviutl2-cli/preview"
+profile = "release"
+include = ["typing_effect_mod2", "typing_effect_obj2", "checker_obj2", "readme", "changelog", "license", "license_aviutl2_rs", "license_lindera", "license_ipadic", "license_pinyin", "license_cc_cedict"]
+
+[release]
+output_dir = "release"
+package_id = "TypingEffect"
+package_name = "TypingEffect"
+package_information = "TypingEffect v{version}"
+zip_name = "TypingEffect_v{version}"
+profile = "release"
+include = ["typing_effect_mod2", "typing_effect_obj2", "checker_obj2", "readme", "changelog", "license", "license_aviutl2_rs", "license_lindera", "license_ipadic", "license_pinyin", "license_cc_cedict"]
