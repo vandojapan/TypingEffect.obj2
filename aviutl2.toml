@@ -2,7 +2,7 @@
 [project]
 id = "typing-effect"
 name = "TypingEffect"
-version = "0.9.9"
+version = "0.9.11"
 
 [artifacts.typing_effect_mod2]
 source = "TypingEffect.mod2"
@@ -62,3 +62,9 @@ aviutl2_version = "latest"
 [release]
 package_id = "TypingEffect"
 zip_name = "TypingEffect_v{version}"
+
+[catalog]
+id = "vandojapan.typing-effect"
+description_path = "readme_user.md"
+license_path = { type = "MIT", path = "LICENSE.txt" }
+download_repo = { owner = "vandojapan", repo = "TypingEffect.obj2" }

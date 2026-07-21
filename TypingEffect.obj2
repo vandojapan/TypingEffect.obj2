@@ -1,4 +1,4 @@
---information:TypingEffect v0.9.9
+--information:TypingEffect v0.9.11
 --group:文章,true
 --text@source:文章,今日はいい天気です
 --select@language:言語,日本語=0,中文=1
@@ -326,6 +326,9 @@ local function parse_text_command(text, start_index)
         return nil
     end
 
+    if string.sub(text, start, start + 3) == "<br>" then
+        return start + 3, "linebreak", false
+    end
     if string.sub(text, start, start + 1) == "<?" then
         local close = string.find(text, "?>", start + 2, true)
         return close and (close + 1) or #text, "excluded", false
@@ -538,6 +541,13 @@ for _, part in ipairs(split_source(resolved_source)) do
             end
             add_event(confirmed, wait_duration)
         end
+    elseif part.kind == "linebreak" then
+        local linebreak_prefix = confirmed
+        confirmed = confirmed .. "\n"
+        confirmed_plain = confirmed_plain .. "\n"
+        confirmed_char_count = confirmed_char_count + 1
+        -- 改行後の空行へカーソルが移動した状態を、通常の1文字入力と同じ時間だけ表示する。
+        add_event(confirmed, current_key_duration, linebreak_prefix, "", false, true)
     elseif part.kind == "control" then
         confirmed = confirmed .. part.text
         if part.affects_metrics then
@@ -688,6 +698,56 @@ local function text_layout(text)
     end
     local w, h, cx, cy = obj.load("text.layout", text, 0, 0, text_alignment)
     return math.max(0, w or 0), math.max(1, h or font_size), cx or 0, cy or 0
+end
+
+local function carries_line_format(command)
+    local prefix1 = string.sub(command, 2, 2)
+    local prefix2 = string.sub(command, 2, 3)
+    return prefix1 == "#"
+        or prefix1 == "s"
+        or prefix1 == "@"
+        or prefix1 == "$"
+        or prefix2 == "gw"
+        or prefix2 == "gh"
+        or prefix2 == "tw"
+        or prefix2 == "th"
+        or prefix2 == "tr"
+end
+
+-- 複数行全体の幅ではなく、カーソルが属する最終行の幅と高さを取得する。
+-- 改行前の書式制御文字は最終行にも引き継がれるため、元の順序で先頭へ付加する。
+local function last_line_layout(text)
+    local inherited_formats = {}
+    local last_line_formats = ""
+    local last_line_start = 1
+    local i = 1
+    while i <= #text do
+        local command_end, command_kind = parse_text_command(text, i)
+        if command_end then
+            local command = string.sub(text, i, command_end)
+            if command_kind == "control" and carries_line_format(command) then
+                inherited_formats[#inherited_formats + 1] = command
+            end
+            i = command_end + 1
+        else
+            local ch = string.sub(text, i, i)
+            if ch == "\n" then
+                last_line_start = i + 1
+                last_line_formats = table.concat(inherited_formats)
+            end
+            i = i + 1
+        end
+    end
+
+    local last_line = string.sub(text, last_line_start)
+    local layout_text = last_line_formats .. last_line
+    local line_w, line_h = text_layout(layout_text)
+    if text_without_commands(last_line) == "" then
+        local _, sample_h = text_layout(last_line_formats .. "Hg")
+        line_w = 0
+        line_h = sample_h
+    end
+    return line_w, line_h
 end
 
 local function draw_rectangle(x, y, w, h, color, alpha)
@@ -871,10 +931,20 @@ local center_point_y = final_top + final_h / 2 + final_cy
 
 obj.setoption("drawtarget", "tempbuffer", canvas_w, canvas_h)
 local current_w, current_h = text_layout(display)
+local last_line_w, last_line_h = last_line_layout(display)
 local left_edge = aligned_left(current_w)
 local top_edge = aligned_top(current_h)
 local text_center_x = left_edge + current_w / 2
 local text_center_y = top_edge + current_h / 2
+
+local last_line_left = left_edge
+if horizontal_alignment == 1 then
+    last_line_left = left_edge + (current_w - last_line_w) / 2
+elseif horizontal_alignment == 2 then
+    last_line_left = left_edge + current_w - last_line_w
+end
+local last_line_top = top_edge + current_h - last_line_h
+local last_line_center_y = last_line_top + last_line_h / 2
 
 -- 仮想バッファへのdraw()では、文字揃えが設定したobj.cx/obj.cyは反映されない。
 -- 文字画像そのものの中心を描画座標へ渡し、上下左右のクリッピングを防ぐ。
@@ -882,35 +952,43 @@ obj.load("text", display, 0, 0, text_alignment)
 obj.draw(text_center_x, text_center_y, 0)
 
 if show_underline and active_event and active_event.underline and active_event.preedit ~= "" then
-    local prefix_w = 0
+    local prefix_last_w = 0
     if active_event.prefix ~= "" then
-        prefix_w = text_layout(active_event.prefix)
+        prefix_last_w = last_line_layout(active_event.prefix)
     end
     -- 制御文字を含むテキストのlayout幅は、前半と後半の単純な加算にならない場合がある。
     -- 未確定文字列も現在のフォント・サイズ指定で直接計測し、0幅になるのを防ぐ。
-    local appended_w = current_w - prefix_w
+    local appended_w = last_line_w - prefix_last_w
     local preedit_w = appended_w
     local underline_x
     if appended_w > 1 then
         -- 通常は確定済み部分の右端を固定し、入力ごとの横揺れを抑える。
-        underline_x = left_edge + prefix_w + appended_w / 2
+        underline_x = last_line_left + prefix_last_w + appended_w / 2
     else
         -- 制御文字によって差分幅を取得できない場合だけ、未確定文字列を直接計測する。
         local formatted_preedit = (active_event.metric_format or "") .. active_event.preedit
         local measured_preedit_w = text_layout(formatted_preedit)
         preedit_w = math.max(1, measured_preedit_w)
-        underline_x = left_edge + current_w - preedit_w / 2
+        underline_x = last_line_left + last_line_w - preedit_w / 2
     end
 
-    -- ローマ字・かな・変換後文字で行ボックス高が変わっても上下位置を固定する。
-    local underline_h = current_h
-    local underline_top = top_edge
+    -- ローマ字・かな・変換後文字で行ボックス高が変わっても、最終行の字面下端へ固定する。
+    local underline_line_h = last_line_h
+    local underline_line_center_y = last_line_center_y
     if active_event.underline_reference ~= "" then
         local _, reference_h = text_layout(active_event.underline_reference)
-        underline_h = reference_h
-        underline_top = aligned_top(reference_h)
+        local _, reference_last_line_h = last_line_layout(active_event.underline_reference)
+        local reference_top = aligned_top(reference_h)
+        underline_line_h = reference_last_line_h
+        underline_line_center_y = reference_top + reference_h - reference_last_line_h / 2
     end
-    local underline_y = underline_top + underline_h + underline_thickness / 2 + underline_vertical_offset
+    local underline_y = underline_line_center_y + underline_line_h / 2
+    local metric_format = active_event.metric_format or current_metric_format
+    local metric_h, metric_offset = cursor_ink_metrics(metric_format)
+    if metric_h and metric_offset then
+        underline_y = underline_line_center_y + metric_offset + metric_h / 2
+    end
+    underline_y = underline_y + underline_thickness / 2 + underline_vertical_offset
     draw_rectangle(underline_x, underline_y, preedit_w, underline_thickness, text_color)
 end
 
@@ -951,14 +1029,14 @@ if show_cursor and (cursor_active or keep_cursor) then
 end
 if draw_cursor and cursor_alpha > 0 then
     -- 実際の字面メトリクスを優先し、取得出来ない場合だけ文字サイズ基準へ戻す。
-    local cursor_h = math.max(1, math.min(current_h, font_size * 0.9))
-    local cursor_x = left_edge + current_w + cursor_gap + cursor_thickness / 2
-    local cursor_y = top_edge + cursor_h / 2
+    local cursor_h = math.max(1, math.min(last_line_h, font_size * 0.9))
+    local cursor_x = last_line_left + last_line_w + cursor_gap + cursor_thickness / 2
+    local cursor_y = last_line_center_y
     local metric_format = active_event and active_event.metric_format or current_metric_format
     local metric_h, metric_offset = cursor_ink_metrics(metric_format)
     if metric_h and metric_offset then
         cursor_h = metric_h
-        cursor_y = text_center_y + metric_offset
+        cursor_y = last_line_center_y + metric_offset
     end
     cursor_h = math.max(1, cursor_h * cursor_height_scale / 100)
     cursor_y = cursor_y + cursor_vertical_offset

@@ -1,6 +1,6 @@
 [package]
 name = "typing_effect_mod2"
-version = "0.9.9"
+version = "0.9.11"
 edition = "2024"
 license = "MIT"
 publish = false

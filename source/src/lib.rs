@@ -8,7 +8,7 @@ use lindera::segmenter::Segmenter;
 use lindera::tokenizer::Tokenizer;
 use pinyin::ToPinyin;
 
-const TYPING_EFFECT_VERSION: &str = "0.9.9";
+const TYPING_EFFECT_VERSION: &str = "0.9.11";
 const LINDERA_VERSION: &str = "4.0.0";
 const AVIUTL2_RS_VERSION: &str = "0.40.0";
 const LANGUAGE_JAPANESE: i32 = 0;
@@ -457,6 +457,9 @@ fn numeric_body_like(body: &str) -> bool {
 }
 
 fn text_command(text: &str) -> Option<(usize, TextCommandKind)> {
+    if text.starts_with("<br>") {
+        return Some((4, TextCommandKind::Control));
+    }
     if text.starts_with("<?") {
         let length = text.find("?>").map(|index| index + 2).unwrap_or(text.len());
         return Some((length, TextCommandKind::Ignored));
@@ -597,7 +600,11 @@ fn normalize_manual(section: &str) -> Option<String> {
     Some(format!("<i>{input}</i>{}", escape_target(target)))
 }
 
-fn analyze_section(section: &str, language: i32) -> Result<String, String> {
+fn analyze_section_with_boundary(
+    section: &str,
+    language: i32,
+    preserve_explicit_section: bool,
+) -> Result<String, String> {
     if section.is_empty() {
         return Ok(String::new());
     }
@@ -615,8 +622,13 @@ fn analyze_section(section: &str, language: i32) -> Result<String, String> {
         LANGUAGE_JAPANESE => {
             let tokens = tokenize_japanese(&plain)?;
             let mut result = String::new();
+            let groups = if preserve_explicit_section && !tokens.is_empty() {
+                vec![tokens]
+            } else {
+                group_bunsetsu(tokens)
+            };
 
-            for group in group_bunsetsu(tokens) {
+            for group in groups {
                 let mut target = String::new();
                 let mut reading = String::new();
                 for token in group {
@@ -639,6 +651,10 @@ fn analyze_section(section: &str, language: i32) -> Result<String, String> {
     }
 }
 
+fn analyze_section(section: &str, language: i32) -> Result<String, String> {
+    analyze_section_with_boundary(section, language, false)
+}
+
 fn annotate_text(text: &str, language: i32) -> String {
     let cache_key = format!("{language}\n{text}");
     if let Ok(runtime) = state().lock() {
@@ -647,12 +663,20 @@ fn annotate_text(text: &str, language: i32) -> String {
         }
     }
 
+    let parts = split_source_parts(text);
+    let has_explicit_separator = parts
+        .iter()
+        .any(|part| matches!(part, SourcePart::Separator));
     let mut result = String::new();
     let mut error = None;
-    for part in split_source_parts(text) {
+    for part in parts {
         match part {
             SourcePart::Text(section) => {
-                let annotated = match analyze_section(&section, language) {
+                let annotated = match analyze_section_with_boundary(
+                    &section,
+                    language,
+                    has_explicit_separator,
+                ) {
                     Ok(value) => value,
                     Err(message) => {
                         error = Some(message);
@@ -776,6 +800,19 @@ mod tests {
     }
 
     #[test]
+    fn explicit_slashes_prevent_nested_bunsetsu_splitting() {
+        let source = "<i>やまみち</i>山路/を/登りながら、/こう考えた。/\n/<i>ち</i>智/に/働けば/<i>かど</i>角/が立つ。";
+        let annotated = annotate_text(source, LANGUAGE_JAPANESE);
+
+        assert!(annotated.contains("/<i>koukangaeta.</i>こう考えた。/"));
+        assert!(!annotated.contains("こう/<i>kangaeta"));
+        assert_eq!(
+            analyze_section("こう考えた。", LANGUAGE_JAPANESE).unwrap(),
+            "<i>kou</i>こう/<i>kangaeta.</i>考えた。"
+        );
+    }
+
+    #[test]
     fn slash_escape_is_preserved() {
         assert_eq!(
             split_source_parts("A\\/B/C"),
@@ -806,6 +843,21 @@ mod tests {
         assert_eq!(analyze_section("<r0>", LANGUAGE_JAPANESE).unwrap(), "<r0>");
         assert_eq!(analyze_section("<w>", LANGUAGE_JAPANESE).unwrap(), "<w>");
         assert_eq!(analyze_section("<w*0.2>", LANGUAGE_CHINESE).unwrap(), "<w*0.2>");
+    }
+
+    #[test]
+    fn line_break_control_is_preserved_during_analysis() {
+        assert_eq!(
+            split_source_parts("今日は<br>いい天気です"),
+            vec![
+                SourcePart::Text("今日は".to_owned()),
+                SourcePart::Control("<br>".to_owned()),
+                SourcePart::Text("いい天気です".to_owned())
+            ]
+        );
+
+        let annotated = annotate_text("今日は<br>いい天気です", LANGUAGE_JAPANESE);
+        assert!(annotated.contains("<br>"));
     }
 
     #[test]
