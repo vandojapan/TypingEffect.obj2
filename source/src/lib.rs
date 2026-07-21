@@ -333,6 +333,9 @@ fn romaji_for(kana: &str) -> Option<&'static str> {
 }
 
 fn lookup_romaji(chars: &[char], index: usize) -> Option<(&'static str, usize)> {
+    if index >= chars.len() {
+        return None;
+    }
     if index + 1 < chars.len() {
         let pair = [chars[index], chars[index + 1]].iter().collect::<String>();
         if let Some(value) = romaji_for(&pair) {
@@ -437,11 +440,87 @@ fn is_nonnegative_number(value: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextCommandKind {
+    Timing,
+    Control,
+    Ignored,
+}
+
+fn numeric_body_like(body: &str) -> bool {
+    body.is_empty()
+        || body
+            .chars()
+            .next()
+            .map(|ch| "+-*.,0123456789".contains(ch))
+            .unwrap_or(false)
+}
+
+fn text_command(text: &str) -> Option<(usize, TextCommandKind)> {
+    if text.starts_with("<?") {
+        let length = text.find("?>").map(|index| index + 2).unwrap_or(text.len());
+        return Some((length, TextCommandKind::Ignored));
+    }
+    if text.starts_with("<//") {
+        let length = text.find("//>").map(|index| index + 3).unwrap_or(text.len());
+        return Some((length, TextCommandKind::Ignored));
+    }
+    if text.starts_with("</>") {
+        if let Some(separator) = text[3..].find("<!").map(|index| index + 3) {
+            if let Some(separator_end) = text[separator + 2..].find('>').map(|index| index + separator + 2) {
+                if let Some(ruby_end) = text[separator_end + 1..]
+                    .find("</>")
+                    .map(|index| index + separator_end + 4)
+                {
+                    return Some((ruby_end, TextCommandKind::Control));
+                }
+            }
+        }
+        return Some((3, TextCommandKind::Control));
+    }
+    if let Some(length) = timing_control_len(text) {
+        return Some((length, TextCommandKind::Timing));
+    }
+
+    let close = text.find('>')?;
+    let tag = &text[..=close];
+    let body_after = |prefix: &str| {
+        tag.strip_prefix(prefix)
+            .and_then(|body| body.strip_suffix('>'))
+    };
+    let kind = if body_after("<c").is_some_and(numeric_body_like) {
+        TextCommandKind::Ignored
+    } else if tag.starts_with("<#") {
+        TextCommandKind::Control
+    } else if body_after("<s").is_some_and(numeric_body_like) {
+        TextCommandKind::Control
+    } else if tag.starts_with("<@") || tag.starts_with("<$") {
+        TextCommandKind::Control
+    } else if body_after("<p").is_some_and(numeric_body_like) {
+        TextCommandKind::Ignored
+    } else if body_after("<gw").is_some_and(numeric_body_like)
+        || body_after("<gh").is_some_and(numeric_body_like)
+        || body_after("<tw").is_some_and(numeric_body_like)
+        || body_after("<th").is_some_and(numeric_body_like)
+        || body_after("<tr").is_some_and(numeric_body_like)
+    {
+        TextCommandKind::Control
+    } else if tag.starts_with("<&") && tag.len() > 3 {
+        TextCommandKind::Control
+    } else if tag.starts_with("<!") {
+        TextCommandKind::Control
+    } else {
+        return None;
+    };
+    Some((close + 1, kind))
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum SourcePart {
     Text(String),
     Separator,
     Timing(String),
+    Control(String),
 }
 
 fn split_source_parts(text: &str) -> Vec<SourcePart> {
@@ -456,23 +535,38 @@ fn split_source_parts(text: &str) -> Vec<SourcePart> {
             buffer.push_str("<i>");
             in_tag = true;
             index += 3;
-        } else if in_tag && (rest.starts_with("</i>") || rest.starts_with("<i/>")) {
-            buffer.push_str(&rest[..4]);
-            in_tag = false;
-            index += 4;
-        } else if !in_tag && timing_control_len(rest).is_some() {
-            let length = timing_control_len(rest).expect("timing control was already validated");
+            continue;
+        }
+        if in_tag {
+            if rest.starts_with("</i>") || rest.starts_with("<i/>") {
+                buffer.push_str(&rest[..4]);
+                in_tag = false;
+                index += 4;
+            } else {
+                let ch = rest.chars().next().expect("valid char boundary");
+                buffer.push(ch);
+                index += ch.len_utf8();
+            }
+            continue;
+        }
+        if let Some((length, kind)) = text_command(rest) {
             if !buffer.is_empty() {
                 parts.push(SourcePart::Text(std::mem::take(&mut buffer)));
             }
-            parts.push(SourcePart::Timing(rest[..length].to_owned()));
+            match kind {
+                TextCommandKind::Timing => parts.push(SourcePart::Timing(rest[..length].to_owned())),
+                TextCommandKind::Control => parts.push(SourcePart::Control(rest[..length].to_owned())),
+                TextCommandKind::Ignored => {}
+            }
             index += length;
-        } else if rest.starts_with("\\/") {
+            continue;
+        }
+        if rest.starts_with("\\/") {
             buffer.push_str("\\/");
             index += 2;
         } else {
             let ch = rest.chars().next().expect("valid char boundary");
-            if !in_tag && ch == '/' {
+            if ch == '/' {
                 if !buffer.is_empty() {
                     parts.push(SourcePart::Text(std::mem::take(&mut buffer)));
                 }
@@ -507,8 +601,10 @@ fn analyze_section(section: &str, language: i32) -> Result<String, String> {
     if section.is_empty() {
         return Ok(String::new());
     }
-    if timing_control_len(section) == Some(section.len()) {
-        return Ok(section.to_owned());
+    if let Some((length, kind)) = text_command(section) {
+        if length == section.len() && kind != TextCommandKind::Ignored {
+            return Ok(section.to_owned());
+        }
     }
     if let Some(manual) = normalize_manual(section) {
         return Ok(manual);
@@ -567,12 +663,9 @@ fn annotate_text(text: &str, language: i32) -> String {
             }
             SourcePart::Separator => result.push('/'),
             SourcePart::Timing(control) => result.push_str(&control),
+            SourcePart::Control(control) => result.push_str(&control),
         }
     }
-    if result.is_empty() {
-        result.push_str(text);
-    }
-
     if let Ok(mut runtime) = state().lock() {
         if let Some(message) = error {
             runtime.last_error = message;
@@ -716,8 +809,58 @@ mod tests {
     }
 
     #[test]
+    fn formatting_controls_are_preserved_and_excluded_controls_are_removed() {
+        let source = "A<#red><s32><@メイリオ,3><@+B><$Preset><p+10><gw2><gh3><tw0.8><th0.9><tr5><&emoji></>漢字<!0.5>かんじ</><//note//>B<c5>C<?=1+1?>D";
+        let parts = split_source_parts(source);
+        let mut controls = Vec::new();
+        let mut text = String::new();
+        for part in parts {
+            match part {
+                SourcePart::Control(control) => controls.push(control),
+                SourcePart::Text(value) => text.push_str(&value),
+                _ => {}
+            }
+        }
+        assert_eq!(
+            controls,
+            vec![
+                "<#red>",
+                "<s32>",
+                "<@メイリオ,3>",
+                "<@+B>",
+                "<$Preset>",
+                "<gw2>",
+                "<gh3>",
+                "<tw0.8>",
+                "<th0.9>",
+                "<tr5>",
+                "<&emoji>",
+                "</>漢字<!0.5>かんじ</>"
+            ]
+        );
+        assert_eq!(text, "ABCD");
+        assert_eq!(annotate_text("<p+10><c5><?obj.rz=90?>", LANGUAGE_JAPANESE), "");
+    }
+
+    #[test]
+    fn full_feature_sample_is_annotated_without_panicking() {
+        let sample = include_str!("../../TEST_TEXT.txt")
+            .lines()
+            .find(|line| line.starts_with("開始/"))
+            .expect("full feature sample line");
+        let annotated = annotate_text(sample, LANGUAGE_JAPANESE);
+
+        assert!(annotated.contains("<r0>"));
+        assert!(annotated.contains("<@+S>"));
+        assert!(annotated.contains("</>漢字<!>かんじ</>"));
+        assert!(!annotated.contains("このコメント"));
+    }
+
+    #[test]
     fn kana_conversion_matches_ime_style() {
         assert_eq!(kana_to_romaji("キョウハ"), "kyouha");
+        assert_eq!(kana_to_romaji("カン"), "kan");
+        assert_eq!(kana_to_romaji("アッ"), "axtu");
         assert_eq!(kana_to_romaji("キッテ"), "kitte");
         assert_eq!(kana_to_romaji("シンアイ"), "shin'ai");
     }
