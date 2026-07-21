@@ -1,4 +1,4 @@
---information:TypingEffect v0.5.4
+--information:TypingEffect v0.9.9
 --group:文章,true
 --text@source:文章,今日はいい天気です
 --select@language:言語,日本語=0,中文=1

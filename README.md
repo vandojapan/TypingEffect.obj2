@@ -1,4 +1,4 @@
-# TypingEffect v0.5.4 — Source Guide
+# TypingEffect v0.9.9 — Source Guide
 
 TypingEffectは、AviUtl2向けの日本語・中文対応IMEタイピングアニメーションです。この文書ではソース構成、ビルド、検査、配布パッケージの作成方法を説明します。利用者向けの操作方法は [`README.txt`](README.txt) を参照してください。
 
@@ -185,7 +185,7 @@ au2 release
 出力予定:
 
 ```text
-release\TypingEffect_v0.5.4.au2pkg.zip
+release\TypingEffect_v0.9.9.au2pkg.zip
 ```
 
 配布パッケージには`README.txt`を含め、開発者向け`README.md`は含めません。

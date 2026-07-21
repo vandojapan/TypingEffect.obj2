@@ -2,7 +2,7 @@
 [project]
 id = "typing-effect"
 name = "TypingEffect"
-version = "0.5.4"
+version = "0.9.9"
 
 [artifacts.typing_effect_mod2]
 source = "TypingEffect.mod2"

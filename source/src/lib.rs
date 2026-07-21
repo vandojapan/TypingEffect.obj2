@@ -8,7 +8,7 @@ use lindera::segmenter::Segmenter;
 use lindera::tokenizer::Tokenizer;
 use pinyin::ToPinyin;
 
-const TYPING_EFFECT_VERSION: &str = "0.5.4";
+const TYPING_EFFECT_VERSION: &str = "0.9.9";
 const LINDERA_VERSION: &str = "4.0.0";
 const AVIUTL2_RS_VERSION: &str = "0.40.0";
 const LANGUAGE_JAPANESE: i32 = 0;

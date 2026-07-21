@@ -1,4 +1,4 @@
-TypingEffect v0.5.4 使用方法
+TypingEffect v0.9.9 使用方法
 ============================
 
 AviUtl2向けのIMEタイピングアニメーションです。
