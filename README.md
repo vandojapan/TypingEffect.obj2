@@ -20,8 +20,6 @@ TypingEffectはLua描画スクリプトとRustスクリプトモジュールの2
   - 自動解析中の手動入力タグと許可されたテキスト制御文字の保持
   - コメント、座標指定、スクリプト、クリア制御文字の解析対象からの除外
 
-外部DLL、外部辞書、実行時設定ファイルは必要ありません。
-
 ## リポジトリ構成
 
 | パス | 内容 |
@@ -38,8 +36,6 @@ TypingEffectはLua描画スクリプトとRustスクリプトモジュールの2
 | `source/check-syntax.ps1` | PowerShellとCargo設定の静的検査 |
 | `source/verify-exports.ps1` | PE32+形式と必須エクスポートの検査 |
 | `licenses/` | 依存ライセンス |
-
-`checker.obj2`は使用しません。解析エンジンと辞書は`TypingEffect.mod2`に内蔵されています。
 
 ## Rust依存関係
 
@@ -131,8 +127,6 @@ au2 dev --detach
 - `GetScriptModuleTable`
 - `InitializePlugin`
 - `UninitializePlugin`
-
-`verify-exports.ps1`はPowerShell内蔵のPEパーサーを使用するため、`dumpbin.exe`は不要です。
 
 ## 個別の検査
 
