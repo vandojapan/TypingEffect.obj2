@@ -24,10 +24,13 @@
 --track@cursor_blink_ratio:点滅割合,0,100,50,1
 --track@cursor_on_speed:点灯速度,0,100,100,1
 --track@cursor_off_speed:消灯速度,0,100,75,1
---track@cursor_thickness:カーソルの太さ,1,100,3,1
+--track@cursor_thickness:太さ,1,100,3,1
+--track@cursor_height_scale:高さ(%),10,300,100,1
+--track@cursor_vertical_offset:上下位置,-500,500,0,1
 --group:未確定文字,false
 --check@show_underline:変換前に下線を表示,true
---track@underline_thickness:下線の太さ,1,12,2,1
+--track@underline_thickness:太さ,1,12,2,1
+--track@underline_vertical_offset:上下位置,-500,500,0,1
 --group
 
 local function utf8_chars(value)
@@ -283,9 +286,49 @@ local function kana_to_romaji(text)
     return table.concat(result)
 end
 
+local function parse_timing_command(text, start_index)
+    local start = start_index or 1
+    if string.sub(text, start, start) ~= "<" then
+        return nil
+    end
+    local name = string.sub(text, start + 1, start + 1)
+    if name ~= "r" and name ~= "w" then
+        return nil
+    end
+    local close = string.find(text, ">", start + 2, true)
+    if not close then
+        return nil
+    end
+
+    local body = string.sub(text, start + 2, close - 1)
+    if name == "r" and body == "" then
+        return close, name, nil, false, true
+    end
+    if name == "w" and body == "" then
+        return close, name, 0, false, false
+    end
+
+    local multiplied = false
+    if name == "w" and string.sub(body, 1, 1) == "*" then
+        multiplied = true
+        body = string.sub(body, 2)
+    end
+    local value = tonumber(body)
+    if value == nil or value < 0 then
+        return nil
+    end
+    return close, name, value, multiplied, false
+end
+
 local function split_source(text)
-    local segments = {}
+    local parts = {}
     local buffer = {}
+    local function flush_text()
+        if #buffer > 0 then
+            parts[#parts + 1] = { kind = "text", text = table.concat(buffer) }
+            buffer = {}
+        end
+    end
     local i = 1
     local in_input_tag = false
     while i <= #text do
@@ -301,20 +344,30 @@ local function split_source(text)
             buffer[#buffer + 1] = tag_close
             in_input_tag = false
             i = i + 4
-        elseif ch == "\\" and next_ch == "/" then
-            buffer[#buffer + 1] = "/"
-            i = i + 2
-        elseif ch == "/" and not in_input_tag then
-            segments[#segments + 1] = table.concat(buffer)
-            buffer = {}
-            i = i + 1
+        elseif not in_input_tag then
+            local command_end = parse_timing_command(text, i)
+            if command_end then
+                flush_text()
+                parts[#parts + 1] = { kind = "timing", text = string.sub(text, i, command_end) }
+                i = command_end + 1
+            elseif ch == "\\" and next_ch == "/" then
+                buffer[#buffer + 1] = "/"
+                i = i + 2
+            elseif ch == "/" then
+                flush_text()
+                parts[#parts + 1] = { kind = "separator" }
+                i = i + 1
+            else
+                buffer[#buffer + 1] = ch
+                i = i + 1
+            end
         else
             buffer[#buffer + 1] = ch
             i = i + 1
         end
     end
-    segments[#segments + 1] = table.concat(buffer)
-    return segments
+    flush_text()
+    return parts
 end
 
 local function parse_segment(segment)
@@ -347,6 +400,7 @@ end
 
 local confirmed = ""
 local key_duration = 1 / math.max(typing_speed, 0.001)
+local current_key_duration = key_duration
 local convert_duration = conversion_wait / 1000
 local gap_duration = section_wait / 1000
 
@@ -363,8 +417,33 @@ if auto_analyze ~= false then
     end
 end
 
-for _, raw_segment in ipairs(split_source(resolved_source)) do
-    if raw_segment ~= "" then
+local ended_with_separator = true
+for _, part in ipairs(split_source(resolved_source)) do
+    if part.kind == "timing" then
+        local _, command_name, command_value, command_multiplied, command_reset =
+            parse_timing_command(part.text, 1)
+        if command_name == "r" then
+            if command_reset then
+                current_key_duration = key_duration
+            elseif command_value == 0 then
+                current_key_duration = 0
+            else
+                current_key_duration = 1 / command_value
+            end
+        elseif command_name == "w" then
+            local wait_duration = command_value
+            if command_multiplied then
+                wait_duration = wait_duration * #utf8_chars(confirmed)
+            end
+            add_event(confirmed, wait_duration)
+        end
+    elseif part.kind == "separator" then
+        if not ended_with_separator then
+            add_event(confirmed, gap_duration)
+        end
+        ended_with_separator = true
+    elseif part.kind == "text" then
+        local raw_segment = part.text
         local input, target = parse_segment(raw_segment)
         local selected_language = language or 0
         if not input and selected_language == 0 then
@@ -383,20 +462,23 @@ for _, raw_segment in ipairs(split_source(resolved_source)) do
                 target = reading
             end
             for _, state in ipairs(states) do
-                add_event(confirmed .. state, key_duration, confirmed, state, true, true)
+                add_event(confirmed .. state, current_key_duration, confirmed, state, true, true)
             end
             add_event(confirmed .. reading, convert_duration, confirmed, reading, true, false)
         else
             local direct = ""
             for _, ch in ipairs(utf8_chars(target)) do
                 direct = direct .. ch
-                add_event(confirmed .. direct, key_duration, confirmed, direct, false, true)
+                add_event(confirmed .. direct, current_key_duration, confirmed, direct, false, true)
             end
         end
 
         confirmed = confirmed .. target
-        add_event(confirmed, gap_duration)
+        ended_with_separator = false
     end
+end
+if confirmed ~= "" and not ended_with_separator then
+    add_event(confirmed, gap_duration)
 end
 
 local total_duration = 0
@@ -561,8 +643,15 @@ max_text_h = math.max(max_text_h, final_h)
 
 local cursor_gap = math.max(1, font_size * 0.08)
 local side_padding = math.max(4, cursor_thickness + cursor_gap + 2)
-local top_padding = math.max(4, font_size * 0.08)
-local bottom_padding = math.max(top_padding, underline_thickness + 3)
+local base_vertical_padding = math.max(4, font_size * 0.08)
+local cursor_scale_padding = math.max(0, max_text_h * (cursor_height_scale / 100 - 1) / 2)
+local manual_vertical_padding = math.max(
+    math.abs(cursor_vertical_offset) + cursor_scale_padding,
+    math.abs(underline_vertical_offset)
+)
+-- 上下へ同じ余白を足し、調整値を変えても文字本体の基準位置を維持する。
+local top_padding = base_vertical_padding + manual_vertical_padding
+local bottom_padding = math.max(base_vertical_padding, underline_thickness + 3) + manual_vertical_padding
 local canvas_w = math.max(1, math.floor(max_text_w + side_padding * 2 + 0.5))
 local canvas_h = math.max(1, math.floor(max_text_h + top_padding + bottom_padding + 0.5))
 
@@ -597,7 +686,7 @@ if show_underline and active_event and active_event.underline and active_event.p
     end
     local preedit_w = math.max(1, current_w - prefix_w)
     local underline_x = left_edge + prefix_w + preedit_w / 2
-    local underline_y = top_edge + current_h + underline_thickness / 2
+    local underline_y = top_edge + current_h + underline_thickness / 2 + underline_vertical_offset
     draw_rectangle(underline_x, underline_y, preedit_w, underline_thickness, text_color)
 end
 
@@ -646,6 +735,8 @@ if draw_cursor and cursor_alpha > 0 then
         cursor_h = metric_h
         cursor_y = text_center_y + metric_offset
     end
+    cursor_h = math.max(1, cursor_h * cursor_height_scale / 100)
+    cursor_y = cursor_y + cursor_vertical_offset
     draw_rectangle(
         cursor_x,
         cursor_y,

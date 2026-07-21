@@ -1,10 +1,12 @@
-<<<<<<< HEAD
 TypingEffect v0.5.4
-=======
-TypingEffect v0.5.3
->>>>>>> f532cd2a9420360ab5e50d69095563711595ba2e
 ===================
 
+・フォントの字面メトリクスに合わせたカーソル高さ・位置の自動調整を追加
+・カーソルの高さと上下位置の手動調整を追加
+・下線の上下位置調整を追加
+・AviUtl2のテキスト時間制御文字 <r> / <w> に対応
+・README.txtを使用方法専用に整理し、ソース説明をREADME.mdへ分離
+・エンジンはTypingEffect.mod2に内蔵されるためchecker.obj2を廃止
 ・verify-exports.ps1のdumpbin.exe依存を廃止
 ・PowerShell内蔵のPE32+解析でx64形式を検査
 ・PEエクスポートテーブルから必須3関数を検査

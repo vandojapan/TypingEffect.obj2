@@ -2,7 +2,7 @@
 [project]
 id = "typing-effect"
 name = "TypingEffect"
-version = "0.5.3"
+version = "0.5.4"
 
 [artifacts.typing_effect_mod2]
 source = "TypingEffect.mod2"
@@ -13,11 +13,6 @@ placement_method = "copy"
 [artifacts.typing_effect_obj2]
 source = "TypingEffect.obj2"
 destination = "Script/TypingEffect/TypingEffect.obj2"
-placement_method = "copy"
-
-[artifacts.checker_obj2]
-source = "checker.obj2"
-destination = "Script/TypingEffect/checker.obj2"
 placement_method = "copy"
 
 [artifacts.readme]

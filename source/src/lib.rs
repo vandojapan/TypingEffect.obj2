@@ -8,7 +8,7 @@ use lindera::segmenter::Segmenter;
 use lindera::tokenizer::Tokenizer;
 use pinyin::ToPinyin;
 
-const TYPING_EFFECT_VERSION: &str = "0.5.3";
+const TYPING_EFFECT_VERSION: &str = "0.5.4";
 const LINDERA_VERSION: &str = "4.0.0";
 const AVIUTL2_RS_VERSION: &str = "0.40.0";
 const LANGUAGE_JAPANESE: i32 = 0;
@@ -412,8 +412,40 @@ fn escape_target(text: &str) -> String {
     result
 }
 
-fn split_manual(text: &str) -> Vec<String> {
-    let mut sections = Vec::new();
+fn timing_control_len(text: &str) -> Option<usize> {
+    let close = text.find('>')?;
+    let tag = &text[..=close];
+    let valid = if let Some(body) = tag.strip_prefix("<r").and_then(|s| s.strip_suffix('>')) {
+        body.is_empty() || is_nonnegative_number(body)
+    } else if let Some(body) = tag.strip_prefix("<w").and_then(|s| s.strip_suffix('>')) {
+        if body.is_empty() {
+            true
+        } else {
+            let number = body.strip_prefix('*').unwrap_or(body);
+            !number.is_empty() && is_nonnegative_number(number)
+        }
+    } else {
+        false
+    };
+    valid.then_some(close + 1)
+}
+
+fn is_nonnegative_number(value: &str) -> bool {
+    value
+        .parse::<f64>()
+        .map(|number| number.is_finite() && number >= 0.0)
+        .unwrap_or(false)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SourcePart {
+    Text(String),
+    Separator,
+    Timing(String),
+}
+
+fn split_source_parts(text: &str) -> Vec<SourcePart> {
+    let mut parts = Vec::new();
     let mut buffer = String::new();
     let mut in_tag = false;
     let mut index = 0;
@@ -428,13 +460,23 @@ fn split_manual(text: &str) -> Vec<String> {
             buffer.push_str(&rest[..4]);
             in_tag = false;
             index += 4;
+        } else if !in_tag && timing_control_len(rest).is_some() {
+            let length = timing_control_len(rest).expect("timing control was already validated");
+            if !buffer.is_empty() {
+                parts.push(SourcePart::Text(std::mem::take(&mut buffer)));
+            }
+            parts.push(SourcePart::Timing(rest[..length].to_owned()));
+            index += length;
         } else if rest.starts_with("\\/") {
             buffer.push_str("\\/");
             index += 2;
         } else {
             let ch = rest.chars().next().expect("valid char boundary");
             if !in_tag && ch == '/' {
-                sections.push(std::mem::take(&mut buffer));
+                if !buffer.is_empty() {
+                    parts.push(SourcePart::Text(std::mem::take(&mut buffer)));
+                }
+                parts.push(SourcePart::Separator);
             } else {
                 buffer.push(ch);
             }
@@ -442,8 +484,10 @@ fn split_manual(text: &str) -> Vec<String> {
         }
     }
 
-    sections.push(buffer);
-    sections
+    if !buffer.is_empty() {
+        parts.push(SourcePart::Text(buffer));
+    }
+    parts
 }
 
 fn normalize_manual(section: &str) -> Option<String> {
@@ -462,6 +506,9 @@ fn normalize_manual(section: &str) -> Option<String> {
 fn analyze_section(section: &str, language: i32) -> Result<String, String> {
     if section.is_empty() {
         return Ok(String::new());
+    }
+    if timing_control_len(section) == Some(section.len()) {
+        return Ok(section.to_owned());
     }
     if let Some(manual) = normalize_manual(section) {
         return Ok(manual);
@@ -506,19 +553,20 @@ fn annotate_text(text: &str, language: i32) -> String {
 
     let mut result = String::new();
     let mut error = None;
-    for section in split_manual(text) {
-        let annotated = match analyze_section(&section, language) {
-            Ok(value) => value,
-            Err(message) => {
-                error = Some(message);
-                section
+    for part in split_source_parts(text) {
+        match part {
+            SourcePart::Text(section) => {
+                let annotated = match analyze_section(&section, language) {
+                    Ok(value) => value,
+                    Err(message) => {
+                        error = Some(message);
+                        section
+                    }
+                };
+                result.push_str(&annotated);
             }
-        };
-        if !annotated.is_empty() {
-            if !result.is_empty() {
-                result.push('/');
-            }
-            result.push_str(&annotated);
+            SourcePart::Separator => result.push('/'),
+            SourcePart::Timing(control) => result.push_str(&control),
         }
     }
     if result.is_empty() {
@@ -623,15 +671,48 @@ mod tests {
     #[test]
     fn manual_sections_are_preserved() {
         assert_eq!(
-            split_manual("今日は/<i>yoi</i>良い/天気です"),
-            vec!["今日は", "<i>yoi</i>良い", "天気です"]
+            split_source_parts("今日は/<i>yoi</i>良い/天気です"),
+            vec![
+                SourcePart::Text("今日は".to_owned()),
+                SourcePart::Separator,
+                SourcePart::Text("<i>yoi</i>良い".to_owned()),
+                SourcePart::Separator,
+                SourcePart::Text("天気です".to_owned())
+            ]
         );
     }
 
     #[test]
     fn slash_escape_is_preserved() {
-        assert_eq!(split_manual("A\\/B/C"), vec!["A\\/B", "C"]);
+        assert_eq!(
+            split_source_parts("A\\/B/C"),
+            vec![
+                SourcePart::Text("A\\/B".to_owned()),
+                SourcePart::Separator,
+                SourcePart::Text("C".to_owned())
+            ]
+        );
         assert_eq!(escape_target("A/B"), "A\\/B");
+    }
+
+    #[test]
+    fn timing_controls_are_preserved_as_sections() {
+        assert_eq!(
+            split_source_parts("今日は<r5>いい<w0.5>天気<w*0.2><r>です"),
+            vec![
+                SourcePart::Text("今日は".to_owned()),
+                SourcePart::Timing("<r5>".to_owned()),
+                SourcePart::Text("いい".to_owned()),
+                SourcePart::Timing("<w0.5>".to_owned()),
+                SourcePart::Text("天気".to_owned()),
+                SourcePart::Timing("<w*0.2>".to_owned()),
+                SourcePart::Timing("<r>".to_owned()),
+                SourcePart::Text("です".to_owned())
+            ]
+        );
+        assert_eq!(analyze_section("<r0>", LANGUAGE_JAPANESE).unwrap(), "<r0>");
+        assert_eq!(analyze_section("<w>", LANGUAGE_JAPANESE).unwrap(), "<w>");
+        assert_eq!(analyze_section("<w*0.2>", LANGUAGE_CHINESE).unwrap(), "<w*0.2>");
     }
 
     #[test]
