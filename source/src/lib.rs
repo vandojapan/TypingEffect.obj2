@@ -8,7 +8,7 @@ use lindera::segmenter::Segmenter;
 use lindera::tokenizer::Tokenizer;
 use pinyin::ToPinyin;
 
-const TYPING_EFFECT_VERSION: &str = "0.9.11";
+const TYPING_EFFECT_VERSION: &str = "0.9.12";
 const LINDERA_VERSION: &str = "4.0.0";
 const AVIUTL2_RS_VERSION: &str = "0.40.0";
 const LANGUAGE_JAPANESE: i32 = 0;
@@ -618,6 +618,37 @@ fn analyze_section_with_boundary(
     }
 
     let plain = section.replace("\\/", "/");
+    // 形態素解析器は半角スペースをトークンとして返さないため、解析前に空白を退避する。
+    // 非空白部分だけを同じ条件で解析し、半角スペースの位置と個数をそのまま復元する。
+    if plain.contains(' ') {
+        let mut result = String::new();
+        let mut chunk = String::new();
+
+        for ch in plain.chars() {
+            if ch == ' ' {
+                if !chunk.is_empty() {
+                    result.push_str(&analyze_section_with_boundary(
+                        &chunk,
+                        language,
+                        preserve_explicit_section,
+                    )?);
+                    chunk.clear();
+                }
+                result.push(' ');
+            } else {
+                chunk.push(ch);
+            }
+        }
+        if !chunk.is_empty() {
+            result.push_str(&analyze_section_with_boundary(
+                &chunk,
+                language,
+                preserve_explicit_section,
+            )?);
+        }
+        return Ok(result);
+    }
+
     match language {
         LANGUAGE_JAPANESE => {
             let tokens = tokenize_japanese(&plain)?;
@@ -664,18 +695,26 @@ fn annotate_text(text: &str, language: i32) -> String {
     }
 
     let parts = split_source_parts(text);
-    let has_explicit_separator = parts
+    let first_explicit_separator = parts
         .iter()
-        .any(|part| matches!(part, SourcePart::Separator));
+        .position(|part| matches!(part, SourcePart::Separator));
+    let last_explicit_separator = parts
+        .iter()
+        .rposition(|part| matches!(part, SourcePart::Separator));
     let mut result = String::new();
     let mut error = None;
-    for part in parts {
+    for (index, part) in parts.into_iter().enumerate() {
         match part {
             SourcePart::Text(section) => {
+                // 前後両方を明示的な / で囲った区間だけ、内部の文節分割を抑止する。
+                // 先頭・末尾の囲われていない文章は、同じ入力内に / があっても通常どおり解析する。
+                let preserve_explicit_section = first_explicit_separator
+                    .is_some_and(|first| first < index)
+                    && last_explicit_separator.is_some_and(|last| index < last);
                 let annotated = match analyze_section_with_boundary(
                     &section,
                     language,
-                    has_explicit_separator,
+                    preserve_explicit_section,
                 ) {
                     Ok(value) => value,
                     Err(message) => {
@@ -813,6 +852,17 @@ mod tests {
     }
 
     #[test]
+    fn text_outside_explicit_slashes_is_still_analyzed() {
+        let prefix = analyze_section("山路を登りながら、", LANGUAGE_JAPANESE).unwrap();
+        assert!(prefix.contains('/'));
+
+        let annotated = annotate_text("山路を登りながら、/こう考えた。/", LANGUAGE_JAPANESE);
+        assert!(annotated.starts_with(&format!("{prefix}/")));
+        assert!(annotated.ends_with("/<i>koukangaeta.</i>こう考えた。/"));
+        assert!(!annotated.contains("こう/<i>kangaeta"));
+    }
+
+    #[test]
     fn slash_escape_is_preserved() {
         assert_eq!(
             split_source_parts("A\\/B/C"),
@@ -858,6 +908,18 @@ mod tests {
 
         let annotated = annotate_text("今日は<br>いい天気です", LANGUAGE_JAPANESE);
         assert!(annotated.contains("<br>"));
+    }
+
+    #[test]
+    fn half_width_spaces_are_preserved_during_analysis() {
+        let source = "半角 スペース  ";
+        let annotated = annotate_text(source, LANGUAGE_JAPANESE);
+
+        assert_eq!(
+            annotated.chars().filter(|ch| *ch == ' ').count(),
+            source.chars().filter(|ch| *ch == ' ').count()
+        );
+        assert!(annotated.ends_with("  "));
     }
 
     #[test]

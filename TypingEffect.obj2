@@ -1,4 +1,4 @@
---information:TypingEffect v0.9.11
+--information:TypingEffect v0.9.12
 --group:文章,true
 --text@source:文章,今日はいい天気です
 --select@language:言語,日本語=0,中文=1
@@ -459,6 +459,15 @@ local function text_without_commands(text)
         if command_end then
             if command_kind == "emoji" then
                 result[#result + 1] = "国"
+            elseif command_kind == "ruby" then
+                -- ルビ制御文字は全体を除去せず、表示される親文字を可視内容として残す。
+                -- 最終行がルビだけでも空行と誤認せず、カーソル位置の行幅を取得できる。
+                local command = string.sub(text, i, command_end)
+                local separator = string.find(command, "<!", 4, true)
+                if separator then
+                    local base = string.sub(command, 4, separator - 1)
+                    result[#result + 1] = text_without_commands(base)
+                end
             end
             i = command_end + 1
         else
@@ -617,8 +626,16 @@ for _, part in ipairs(split_source(resolved_source)) do
         local raw_segment = part.text
         local input, target = parse_segment(raw_segment)
         local selected_language = language or 0
+        -- 表示対象に英字が含まれる区間はIME変換を行わず、確定文字を直接入力する。
+        -- これによりAIなどの英字が「あい」のようなひらがなへ変化する演出を防ぐ。
+        local contains_latin = string.find(target, "[A-Za-z]") ~= nil
+        if selected_language == 0 and contains_latin then
+            input = nil
+        end
         if not input and selected_language == 0 then
-            input = kana_to_romaji(target)
+            if not contains_latin then
+                input = kana_to_romaji(target)
+            end
         end
 
         if input then
@@ -627,7 +644,10 @@ for _, part in ipairs(split_source(resolved_source)) do
                 -- 中文では拼音・注音を変換せず、そのまま未確定文字として表示する。
                 states, reading = simulate_literal_input(input)
             else
-                states, reading = simulate_romaji(input)
+                -- 手動指定の読みがひらがな・カタカナの場合も、ローマ字入力の演出へ変換する。
+                -- すでにローマ字で指定されている場合は、変換できないため元の入力列を使用する。
+                local romaji_input = kana_to_romaji(input) or input
+                states, reading = simulate_romaji(romaji_input)
             end
             if target == "" then
                 target = reading
@@ -714,6 +734,33 @@ local function carries_line_format(command)
         or prefix2 == "tr"
 end
 
+-- ルビの読みを除去し、親文字と通常の書式制御文字だけを残す。
+-- ルビ全体の行ボックスとは別に親文字側の高さを取得し、ベースライン補正に使用する。
+local function ruby_parent_text(text)
+    local result = {}
+    local i = 1
+    while i <= #text do
+        local command_end, command_kind = parse_text_command(text, i)
+        if command_end then
+            local command = string.sub(text, i, command_end)
+            if command_kind == "ruby" then
+                local separator = string.find(command, "<!", 4, true)
+                if separator then
+                    local base = string.sub(command, 4, separator - 1)
+                    result[#result + 1] = ruby_parent_text(base)
+                end
+            else
+                result[#result + 1] = command
+            end
+            i = command_end + 1
+        else
+            result[#result + 1] = string.sub(text, i, i)
+            i = i + 1
+        end
+    end
+    return table.concat(result)
+end
+
 -- 複数行全体の幅ではなく、カーソルが属する最終行の幅と高さを取得する。
 -- 改行前の書式制御文字は最終行にも引き継がれるため、元の順序で先頭へ付加する。
 local function last_line_layout(text)
@@ -742,12 +789,29 @@ local function last_line_layout(text)
     local last_line = string.sub(text, last_line_start)
     local layout_text = last_line_formats .. last_line
     local line_w, line_h = text_layout(layout_text)
-    if text_without_commands(last_line) == "" then
+    local parent_w, parent_h = text_layout(last_line_formats .. ruby_parent_text(last_line))
+    local visible_line = text_without_commands(last_line)
+    local cursor_w = line_w
+
+    -- text.layoutの画像幅には行末の半角スペースが含まれないため、現在の書式で送り幅を補う。
+    -- 「国 国」と「国国」の差を使うことで、フォントサイズと字間の設定も反映する。
+    local trailing_spaces = string.match(visible_line, " +$")
+    if trailing_spaces then
+        local end_formats = table.concat(inherited_formats)
+        local compact_w = text_layout(end_formats .. "国国")
+        local spaced_w = text_layout(end_formats .. "国 国")
+        local half_space_w = math.max(0, spaced_w - compact_w)
+        cursor_w = math.max(line_w, parent_w + #trailing_spaces * half_space_w)
+    end
+
+    if visible_line == "" then
         local _, sample_h = text_layout(last_line_formats .. "Hg")
         line_w = 0
         line_h = sample_h
+        parent_h = sample_h
+        cursor_w = 0
     end
-    return line_w, line_h
+    return line_w, line_h, parent_h, cursor_w
 end
 
 local function draw_rectangle(x, y, w, h, color, alpha)
@@ -876,11 +940,13 @@ local max_text_w = 1
 local max_text_h = math.max(1, font_size)
 for _, event in ipairs(events) do
     local w, h = text_layout(event.text)
-    max_text_w = math.max(max_text_w, w)
+    local _, _, _, line_cursor_w = last_line_layout(event.text)
+    max_text_w = math.max(max_text_w, w, line_cursor_w)
     max_text_h = math.max(max_text_h, h)
 end
 local final_w, final_h, final_cx, final_cy = text_layout(confirmed)
-max_text_w = math.max(max_text_w, final_w)
+local _, _, _, final_cursor_w = last_line_layout(confirmed)
+max_text_w = math.max(max_text_w, final_w, final_cursor_w)
 max_text_h = math.max(max_text_h, final_h)
 
 local cursor_gap = math.max(1, font_size * 0.08)
@@ -931,7 +997,7 @@ local center_point_y = final_top + final_h / 2 + final_cy
 
 obj.setoption("drawtarget", "tempbuffer", canvas_w, canvas_h)
 local current_w, current_h = text_layout(display)
-local last_line_w, last_line_h = last_line_layout(display)
+local last_line_w, last_line_h, last_line_parent_h, last_line_cursor_w = last_line_layout(display)
 local left_edge = aligned_left(current_w)
 local top_edge = aligned_top(current_h)
 local text_center_x = left_edge + current_w / 2
@@ -945,6 +1011,8 @@ elseif horizontal_alignment == 2 then
 end
 local last_line_top = top_edge + current_h - last_line_h
 local last_line_center_y = last_line_top + last_line_h / 2
+-- ルビは親文字の上へ追加されるため、行ボックスの下端から親文字の高さを戻して中心を求める。
+local last_line_parent_center_y = last_line_top + last_line_h - last_line_parent_h / 2
 
 -- 仮想バッファへのdraw()では、文字揃えが設定したobj.cx/obj.cyは反映されない。
 -- 文字画像そのものの中心を描画座標へ渡し、上下左右のクリッピングを防ぐ。
@@ -1028,15 +1096,15 @@ if show_cursor and (cursor_active or keep_cursor) then
     end
 end
 if draw_cursor and cursor_alpha > 0 then
-    -- 実際の字面メトリクスを優先し、取得出来ない場合だけ文字サイズ基準へ戻す。
-    local cursor_h = math.max(1, math.min(last_line_h, font_size * 0.9))
-    local cursor_x = last_line_left + last_line_w + cursor_gap + cursor_thickness / 2
-    local cursor_y = last_line_center_y
+    -- 実際の字面メトリクスを優先し、ルビがある場合も親文字側のベースラインへ合わせる。
+    local cursor_h = math.max(1, math.min(last_line_parent_h, font_size * 0.9))
+    local cursor_x = last_line_left + last_line_cursor_w + cursor_gap + cursor_thickness / 2
+    local cursor_y = last_line_parent_center_y
     local metric_format = active_event and active_event.metric_format or current_metric_format
     local metric_h, metric_offset = cursor_ink_metrics(metric_format)
     if metric_h and metric_offset then
         cursor_h = metric_h
-        cursor_y = last_line_center_y + metric_offset
+        cursor_y = last_line_parent_center_y + metric_offset
     end
     cursor_h = math.max(1, cursor_h * cursor_height_scale / 100)
     cursor_y = cursor_y + cursor_vertical_offset
